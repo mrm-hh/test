@@ -284,7 +284,13 @@ open class AwsIoTAPIManager {
                 if devKind != "Fitbit" {
                     devKind = "HealthKit"
                 }
-                if let test = json[path! + "_" + devKind!].asString {
+                var temp_key = ""
+                if path! == "speed" {
+                    temp_key = (HealthType.ActivityDistance["path"] as! String) + "_" + devKind!
+                } else {
+                    temp_key = path! + "_" + devKind!
+                }
+                if let test = json[temp_key].asString {
     //                dataLastDate = (test as NSString).substringToIndex(8)
                     dataDateFlg = test
                 } else {
@@ -420,8 +426,7 @@ open class AwsIoTAPIManager {
 
                 self?.mqttClientPub!.publish(iotRawData!, topic: SystemConstants.IotIFTopic.IOT_DEV_DATA_SEND.rawValue, qos: 0, retain: false)
 //                    print("送信統計データ: " + skey + ", " + sendData["iot_data"]!)
-
-                usleep(1000);
+                usleep(300);
 
             }
 //                self!.close()
@@ -430,7 +435,7 @@ open class AwsIoTAPIManager {
                 self!.processDataManager!.initSendMinCheckDate = ""
             }
             
-            self!.sendIoTMesaiData(iotDataList, completionHandler: { [weak self]
+            self!.sendIoTMesaiData(iotDataList, json: json, completionHandler: { [weak self]
                 sendFlg in
                 
                 completionHandler(sendFlg)
@@ -439,12 +444,11 @@ open class AwsIoTAPIManager {
         })
     }
     
-    fileprivate func sendIoTMesaiData(_ iotDataList: [JSON], completionHandler: @escaping (Bool) -> Void) {
+    fileprivate func sendIoTMesaiData(_ iotDataList: [JSON], json: JSON, completionHandler: @escaping (Bool) -> Void) {
         
-        
-            
 //            print("Iot Dates: " + json.toString())
             var sendFlg = false
+            var sendCnt = 0
         
 //            let json = JSON.parse(jsonStr)
             for iotDatas:JSON in iotDataList {
@@ -462,26 +466,73 @@ open class AwsIoTAPIManager {
                 }
                 
                 var devKind = dev
-            
-                var dataDateFlg: String?
                 if devKind != "Fitbit" {
                     devKind = "HealthKit"
                 }
+
+                var dataDateFlg: String?
+                if let test = json[path! + "_" + devKind!].asString {
+    //                dataLastDate = (test as NSString).substringToIndex(8)
+                    dataDateFlg = test
+                } else {
+                    // speedは明細データを送信しない
+                    let e = json[path! + "_" + devKind!].asError
+//                    print(e)
+                    continue
+                }
+                var dateFlg: String = ""    // local日更新フラグ
+                var sinceDay: String = ""
+//                let kind = (dev == "Fitbit") ? dev : "HealthKit"
+                if dataDateFlg!.characters.count <= 10 {
+                    dateFlg = self.processDataManager!.localData!.getInitDateFlg(devKind!)
+                    if devKind == dev {
+                        sinceDay = self.processDataManager!.localData!.memberSinceFitbit!
+                    } else {
+                        sinceDay = self.processDataManager!.localData!.memberSinceHealthKit!
+                    }
+                } else {
+                    let ary = dataDateFlg?.components(separatedBy: ",")
+                    if ary == nil || ary?.count != 2 {
+                        print("AWSのIotUserデータ不正: \(dataDateFlg)")
+                        completionHandler(false)
+                        return
+                    }
+                    sinceDay = ary![0]
+                    // HealthKitの場合
+                    if devKind != dev {
+                        if self.processDataManager!.localData!.memberSinceHealthKit != nil {
+                            // サーバーの開始日はローカルのと一致の場合
+                            if sinceDay == self.processDataManager!.localData!.memberSinceHealthKit! {
+                                dateFlg = ary![1]
+                            } else {
+                                sinceDay = self.processDataManager!.localData!.memberSinceHealthKit!
+                                dateFlg = self.processDataManager!.localData!.getInitDateFlg(devKind!)
+                            }
+                        }
+                    } else {
+//                        sinceDay = ary![0]
+                        dateFlg = ary![1]
+                    }
+                }
+                
                 // 送信対象日を確定する
+                if path == "activities/heart" {
+                    print("found")
+                }
                 let objResults = self.processDataManager!.getTransDataDates(devKind!, path: path!, awsDateFlg: dateFlg)
                 if objResults.count < 2 {
                     continue
                 }
-                let objDates = objResults["meisai"]!
-                let objSumDate = objResults["sumary"]!
+                let objMeisais = objResults["meisai"]!
+//                let objSumDate = objResults["sumary"]!
                 let skey = dev! + "_" + path!
-                // 統計データ開始日
-                for (k,_) in objSumDate {
-                    sendDates[skey] = k
-                    break
-                }
+//                // 統計データ開始日
+//                for (k,_) in objSumDate {
+//                    sendDates[skey] = k
+//                    break
+//                }
                 
-                if objDates.count == 0 {
+                if objMeisais.count == 0 {
 //                    completionHandler(false)
 //                    return
                     continue
@@ -490,15 +541,28 @@ open class AwsIoTAPIManager {
                 // 明細データ送信
                 var sendDataDate: [String:String] = [:]
                 
+//                // データ30件毎にトランザクション化する
+//                var objDates: [String:String] = [:]
+//                var cnt = 0;
+//                for (k,v) in objMeisais {
+//                    if cnt > 29 {
+//                        break
+//                    }
+//                    objDates[k] = v
+//                    cnt += 1
+//                }
+                
                 sendDataDate["user_id"] = self.serviceOpenID
                 sendDataDate["dev"] = dev
                 sendDataDate["path"] = path
     //            sendData["upd_date"] = iotDatas["upddate"].asString
                 sendDataDate["actionType"] = "updateUserData"
-                let newDate = sinceDay + "," + self.processDataManager!.makeNewAwsDateFlg(devKind!, path: path!, awsDateFlg: dateFlg)
+                
+                var objDates: [String:String] = [:]
+                var cnt = 0;
                 for (k, v) in iotDatas["data"] {
                     let day = k as? String
-                    if objDates[day!] != nil {
+                    if objMeisais[day!] != nil {
                         
                         let mdata = self.processDataManager!.getDayMeisaiData(path!, dev: dev!, day: day!)
                         // 明細未取得のデータを送信対象外とする
@@ -515,31 +579,40 @@ open class AwsIoTAPIManager {
                         if !sendFlg {
                             sendFlg = true
                         }
+                        sendCnt += 1
                         usleep(100);
-//                        if day > newDate {
-//                            newDate = day!
-//                        }
+                        
+                        objDates[day!] = "1"
+                        cnt += 1
+                    }
+                    
+                    // データ30件毎にトランザクション化する
+                    if cnt == 30 {
+                        let newDate = sinceDay + "," + self.processDataManager!.makeNewAwsDateFlg2(objDates, sinceDay: sinceDay, awsDateFlg: dateFlg)
+                        if dev != "Other" {
+                            updateLastDataDate(iotDatas["path"].asString!, dev: iotDatas["dev"].asString!, newDate: newDate)
+    //                        print("日付フラグ更新：\(iotDatas["path"].asString),\(iotDatas["dev"].asString)")
+                        }
+                        cnt = 0
+                        objDates = [:]
+                    }
+                    
+                    // １回、種類ごとに最大９０件を送信する
+                    if sendCnt > 90 {
+                        break
                     }
                 }
-                if newDate != sinceDay + "," + dateFlg {
-//                    // Fitbitの場合、日中明細の最終取得日を次回の送信開始日とする
-//                    if dev == "Fitbit" {
-//                        if let meisaiDay = (processDataManager.localData!.storageDate[dev!] as! [String:String])[path!] {
-//                            if newDate > meisaiDay {
-//                                newDate = meisaiDay
-//                            }
-//                        }
-//                    }
+                if objDates.count > 0 {
+                    let newDate = sinceDay + "," + self.processDataManager!.makeNewAwsDateFlg2(objDates, sinceDay: sinceDay, awsDateFlg: dateFlg)
                     // 手入力の場合、過日修正の可能性があるので、全部再送とする
                     if dev != "Other" {
-                        self!.updateLastDataDate(iotDatas["path"].asString!, dev: iotDatas["dev"].asString!, newDate: newDate)
+                        updateLastDataDate(iotDatas["path"].asString!, dev: iotDatas["dev"].asString!, newDate: newDate)
 //                        print("日付フラグ更新：\(iotDatas["path"].asString),\(iotDatas["dev"].asString)")
                     }
-                } else {
-//                    print("Flg更新対象外： " + newDate)
+                    
                 }
             }
-            
+        
 //            sendFlg = sendFlg || (dev == "AUTO")
             completionHandler(sendFlg)
         
