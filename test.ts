@@ -291,11 +291,11 @@ export class Car2dModelComponent implements OnInit, OnDestroy, AfterContentInit 
     // }
     if (this.newpd >= 0) {
       this.arrow1.scale.x = (this.initPDWidth + mv) / this.initPDWidth;
-      this.arrow1.position.x += (mv / 2);
+      this.arrow1.position.x -= (mv / 2);
     } else {
       this.arrow1.scale.x = (this.newpd * -1) / this.initPDWidth;
       console.log('arrow1.scale.x: ' + this.arrow1.scale.x);
-      this.arrow1.position.x = this.initPDWidth + (this.arrow1.scale.x * this.initPDWidth / 2);
+      this.arrow1.position.x = this.initPDWidth + (this.newpd * -1 / 2);
       console.log('arrow1.position.x: ' + this.arrow1.position.x);
     }
 
