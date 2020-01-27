@@ -154,6 +154,7 @@ function rotateAroundObjectAxis(object, axis, radians) {
     object.rotation.getRotationFromMatrix(object.matrix, object.scale);
 }
 
+var rotLocalMatrix;
 var rotWorldMatrix;
 // Rotate an object around an arbitrary axis in world space       
 function rotateAroundWorldAxis(object, axis, radians) {
