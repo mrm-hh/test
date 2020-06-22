@@ -40,6 +40,9 @@ function init() {
   //mesh.useQuaternion = true;
   scene.add( mesh );
 
+  var axis = new THREE.AxesHelper(1000);
+  scene.add(axis);
+
   renderer = new THREE.CanvasRenderer();
   renderer.setSize( window.innerWidth, window.innerHeight );
 
